@@ -1,6 +1,6 @@
 from pylinac import CatPhan504
 
-f = "D:\Github\MPH3013-Special-Project\Pylinac\Images"
+f = "D:\Github\MPH3013-Special-Project\Pylinac Demo\Images"
 
 ct504 = CatPhan504(f)
 

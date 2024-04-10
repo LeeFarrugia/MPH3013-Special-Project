@@ -140,6 +140,16 @@ lsf_horizontal, lsf_vertical = compute_lsf_from_pixels(pixels_inside_square)
 frequencies, mtf_horizontal = compute_mtf_from_lsf(lsf_horizontal, pixel_spacing)
 frequencies, mtf_vertical = compute_mtf_from_lsf(lsf_vertical, pixel_spacing)
 
+# Plot the LSF
+plt.plot(lsf_horizontal, label='Horizontal LSF')
+plt.plot(lsf_vertical, label='Vertical LSF')
+plt.xlabel('Pixel Position')
+plt.ylabel('Intensity')
+plt.title('Line Spread Function (LSF) from Pixels Inside Square ROI')
+plt.legend()
+plt.grid(True)
+plt.show()
+
 # Plot the MTF
 plt.plot(frequencies, mtf_horizontal, label='Horizontal MTF')
 plt.xlabel('Spatial Frequency (cycles/mm)')

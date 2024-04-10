@@ -49,73 +49,49 @@ def compute_pixel_spacing(dicom):
     else:
         raise ValueError("Pixel spacing not found in DICOM metadata")
 
-def compute_psf_from_square_roi(image, square_origin, square_size):
+def compute_mtf_from_lsf(lsf, pixel_spacing):
     """
-    Compute the Point Spread Function (PSF) from a square Region of Interest (ROI).
+    Compute the Modulation Transfer Function (MTF) from the Line Spread Function (LSF).
 
     Parameters:
-    image (numpy.ndarray): Array containing the image data.
-    square_origin (tuple): Coordinates (x, y) of the top-left corner of the square ROI.
-    square_size (int): Size of the square ROI in pixels.
-
-    Returns:
-    numpy.ndarray: Array containing the Point Spread Function (PSF).
-    """
-    # Extract pixels inside the square ROI
-    x0, y0 = square_origin
-    roi = image[y0:y0+square_size, x0:x0+square_size]
-    
-    # Compute the PSF by averaging intensity values along rows and columns
-    psf = np.mean(roi, axis=(0, 1))  # Assuming a 2D ROI
-    
-    # Normalize the PSF
-    psf /= np.sum(psf)
-    
-    return psf
-
-def compute_mtf_from_psf(psf, pixel_spacing):
-    """
-    Compute the Modulation Transfer Function (MTF) from the Point Spread Function (PSF).
-
-    Parameters:
-    psf (numpy.ndarray): Array containing the Point Spread Function (PSF).
+    lsf (numpy.ndarray): Array containing intensity values along the line (LSF).
     pixel_spacing (float): Pixel spacing in the image (in mm).
 
     Returns:
     numpy.ndarray: Array containing spatial frequencies.
     numpy.ndarray: Array containing MTF values.
     """
-    # Compute the Discrete Fourier Transform (DFT) of the PSF
-    dft_psf = np.fft.fft2(psf)
+    # Calculate spatial frequencies
+    num_pixels = len(lsf)
+    frequencies = fftpack.fftfreq(num_pixels, d=pixel_spacing)
     
-    # Compute the magnitude spectrum
-    magnitude_spectrum = np.abs(dft_psf)
+    # Perform Fourier Transform of the LSF
+    lsf_fft = fftpack.fft(lsf)
     
-    # Compute the spatial frequencies
-    num_rows, num_cols = psf.shape
-    frequencies_x = np.fft.fftfreq(num_cols, d=pixel_spacing)
-    frequencies_y = np.fft.fftfreq(num_rows, d=pixel_spacing)
+    # Calculate MTF (absolute value of the Fourier Transform)
+    mtf = np.abs(lsf_fft)
     
-    # Normalize the magnitude spectrum
-    normalized_magnitude_spectrum = magnitude_spectrum / np.max(magnitude_spectrum)
-    
-    return frequencies_x, frequencies_y, normalized_magnitude_spectrum
+    return frequencies, mtf
 
-def plot_mtf_from_psf(psf, frequencies_x, frequencies_y, title="Modulation Transfer Function (MTF)"):
-    print("Shapes of input arrays:")
-    print("psf:", psf.shape)
-    print("frequencies_x:", frequencies_x.shape)
-    print("frequencies_y:", frequencies_y.shape)
-    
-    plt.plot(frequencies_x, psf, label='X direction')
-    plt.plot(frequencies_y, psf, label='Y direction')
-    plt.xlabel('Spatial Frequency (cycles/mm)')
-    plt.ylabel('MTF')
-    plt.title(title)
-    plt.legend()
-    plt.grid(True)
-    plt.show()
+def compute_lsf_from_pixels(pixels):
+    """
+    Compute the Line Spread Function (LSF) from the pixels inside the square ROI.
 
+    Parameters:
+    pixels (numpy.ndarray): Array containing pixel values inside the square ROI.
+
+    Returns:
+    numpy.ndarray: Array containing intensity values along the line.
+    """
+    # Calculate the center of the square ROI
+    center_x = pixels.shape[1] // 2
+    center_y = pixels.shape[0] // 2
+    
+    # Compute the LSF along the vertical and horizontal axes
+    lsf_horizontal = pixels[center_y, :]
+    lsf_vertical = pixels[:, center_x]
+    
+    return lsf_horizontal, lsf_vertical
 
 def extract_pixels_inside_square_roi(dicom_file_path, square_origin, square_size):
     # Load DICOM file
@@ -131,6 +107,7 @@ def extract_pixels_inside_square_roi(dicom_file_path, square_origin, square_size
     pixels_inside_square = image[y0:y0+square_size, x0:x0+square_size]
     
     return pixels_inside_square
+
 
 # Example usage
 dicom_file_path = 'D:\Github\MPH3013-Special-Project\Coding\mdh_images\PHYSICS_BODY_CATPHAN.CT.ABDOMEN_ABDOMENSEQ_(ADULT).0003.0004.2023.02.08.12.00.21.950084.6467264.IMA'
@@ -156,8 +133,26 @@ pixel_spacing = compute_pixel_spacing(dicom)
 # Extract pixels inside the square ROI
 pixels_inside_square = extract_pixels_inside_square_roi(dicom_file_path, square_origin, square_size)
 
-psf = compute_psf_from_square_roi(pixels_inside_square, square_origin, square_size)
+# Compute the Line Spread Function (LSF) from the pixels inside the square ROI
+lsf_horizontal, lsf_vertical = compute_lsf_from_pixels(pixels_inside_square)
 
-frequencies_x, frequencies_y, _ = compute_mtf_from_psf(psf, pixel_spacing)
+# Compute the Modulation Transfer Function (MTF) from the Line Spread Function (LSF)
+frequencies, mtf_horizontal = compute_mtf_from_lsf(lsf_horizontal, pixel_spacing)
+frequencies, mtf_vertical = compute_mtf_from_lsf(lsf_vertical, pixel_spacing)
 
-plot_mtf_from_psf(psf, frequencies_x, frequencies_y)
+# Plot the MTF
+plt.plot(frequencies, mtf_horizontal, label='Horizontal MTF')
+plt.xlabel('Spatial Frequency (cycles/mm)')
+plt.ylabel('MTF')
+plt.title('Modulation Transfer Function (MTF) from Line Spread Function (LSF)')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+plt.plot(frequencies, mtf_vertical, label='Vertical MTF')
+plt.xlabel('Spatial Frequency (cycles/mm)')
+plt.ylabel('MTF')
+plt.title('Modulation Transfer Function (MTF) from Line Spread Function (LSF)')
+plt.legend()
+plt.grid(True)
+plt.show()

@@ -28,10 +28,11 @@ def calculate_ct_numbers_roi(dicom_file_path, square_origin, square_size):
     
     # Extract square coordinates
     x0, y0 = square_origin
-    
     # Define the square ROI coordinates
-    x1 = x0 + square_size
-    y1 = y0 + square_size
+    x0 = int(x0)
+    y0 = int(y0)
+    x1 = int(x0 + square_size)
+    y1 = int(y0 + square_size)
     
     # Crop the image to the ROI
     roi_image = image[y0:y1, x0:x1]
@@ -66,15 +67,18 @@ def fit_gaussian_to_psf(psf, sampling_distance):
     """
     Fit a Gaussian curve to the Point Spread Function (PSF) and extract FWHM.
     """
-    # Compute the mean value
-    mean_value = np.sum(psf * np.arange(len(psf))) / np.sum(psf)
     
     # Initial guess for parameters
     amplitude_guess = np.max(psf)
     stddev_guess = len(psf) / 10  # Initial guess based on the size of the PSF
-    
-    # Fit the Gaussian curve
-    popt, _ = curve_fit(gaussian, np.arange(len(psf)), psf, p0=[amplitude_guess, mean_value, stddev_guess])
+
+    # Adjust initial guesses for parameters
+    amplitude_guess = np.max(psf)
+    mean_guess = np.argmax(psf)  # Initial guess based on the peak of the PSF
+    stddev_guess = len(psf) / 10  # Initial guess based on the size of the PSF
+
+    # Fit the Gaussian curve with adjusted initial guesses
+    popt, _ = curve_fit(gaussian, np.arange(len(psf)), psf, p0=[amplitude_guess, mean_guess, stddev_guess], maxfev=500000)
     
     # Extract FWHM from the fitted Gaussian curve
     fwhm = 2 * np.sqrt(2 * np.log(2)) * popt[2] * sampling_distance
@@ -173,11 +177,18 @@ def process_dicom_folder(folder_path, square_size):
         
         # Process DICOM files
         dicom_file_path = file_path
+
+        # Read DICOM file
+        dicom = pydicom.dcmread(dicom_file_path)
+
+        # Extract pixel array
+        image = dicom.pixel_array
+
+        max_hu_pixel = np.unravel_index(np.argmax(image), image.shape)
         
         # Coordinates of the top-left corner of the square ROI
-        point_location_x = 255
-        point_location_y = 368
-        square_origin = (int((point_location_x - (0.5 * square_size))), int((point_location_y - (0.5 * square_size))))
+        square_half_size = square_size/2  # Adjust the size if needed
+        square_origin = (max_hu_pixel[1] - square_half_size, max_hu_pixel[0] - square_half_size)
         
         # Create a new figure for each DICOM image file
         fig, axs = plt.subplots(1, 3, figsize=(12, 6))

@@ -171,10 +171,17 @@ def is_dicom_file(file_path):
 
 def process_dicom_folder(folder_path, square_size):
     # List image files in the folder
-    image_files = [os.path.join(folder_path, file) for file in os.listdir(folder_path) if is_dicom_file(os.path.join(folder_path, file))]
+    image_files = [os.path.join(folder_path, file) for file in os.listdir(folder_path)]
     
-    # Process each DICOM image file
-    for dicom_file_path in image_files:
+    # Process each file in the folder
+    for file_path in image_files:
+        if not is_dicom_file(file_path):
+            print(f"Skipping non-DICOM file: {file_path}")
+            continue
+        
+        # Process DICOM files
+        dicom_file_path = file_path
+        
         # Coordinates of the top-left corner of the square ROI
         point_location_x = 255
         point_location_y = 368
@@ -207,8 +214,19 @@ def process_dicom_folder(folder_path, square_size):
         # Show the figure
         plt.show()
 
+def get_positive_integer_input(prompt):
+    while True:
+        try:
+            value = int(input(prompt))
+            if value <= 0:
+                print("Please enter a positive integer.")
+                continue
+            return value
+        except ValueError:
+            print("Please enter a valid integer.")
+
 # Input square size
-square_size = int(input("Enter the size of the square ROI in pixels: "))
+square_size = get_positive_integer_input("Enter the size of the square ROI in pixels: ")
 
 # Folder path containing DICOM files
 folder_path = r'D:\Github\MPH3013-Special-Project\Coding\Images to be processed'

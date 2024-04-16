@@ -17,12 +17,12 @@ def calculate_ct_numbers_roi(dicom_file_path, square_origin, square_size):
     
     # Extract pixel spacing
     pixel_spacing = dicom.PixelSpacing
-    if len(pixel_spacing) != 2:
-        raise ValueError("Pixel spacing information is incomplete.")
-    pixel_spacing_x, pixel_spacing_y = pixel_spacing
+    if pixel_spacing is None or len(pixel_spacing) != 2:
+        raise ValueError("Pixel spacing information is missing or incomplete.")
+    pixel_spacing_x, pixel_spacing_y = map(float, pixel_spacing)
     
     # Calculate the sampling distance (cm per sample)
-    sampling_distance = max(float(pixel_spacing_x), float(pixel_spacing_y))
+    sampling_distance = max(pixel_spacing_x, pixel_spacing_y)
     
     # Extract square coordinates
     x0, y0 = square_origin

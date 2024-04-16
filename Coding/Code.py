@@ -1,7 +1,9 @@
+import os
 import pydicom
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+from pydicom.errors import InvalidDicomError
 from scipy.optimize import curve_fit
 
 def calculate_ct_numbers_roi(dicom_file_path, square_origin, square_size):
@@ -160,46 +162,56 @@ def plot_mtf(ax, lsf, sampling_distance):
     ax.legend(loc='upper right')
     ax.grid(True)
 
-# List of DICOM files
-dicom_files = [
-    r'D:\Github\MPH3013-Special-Project\Coding\mdh_images\PHYSICS_BODY_CATPHAN.CT.ABDOMEN_ABDOMENSEQ_(ADULT).0003.0004.2023.02.08.12.00.21.950084.6467264.IMA',
-    r'D:\Github\MPH3013-Special-Project\Coding\mdh_images\PHYSICS_CATPHAN.CT.HEAD_HEADROUTINESEQ_(ADULT).0006.0003.2023.02.08.11.59.27.521533.6462115.IMA',
-    # Add more DICOM file paths as needed
-]
+def is_dicom_file(file_path):
+    try:
+        pydicom.dcmread(file_path)
+        return True
+    except (InvalidDicomError, IOError):
+        return False
+
+def process_dicom_folder(folder_path, square_size):
+    # List image files in the folder
+    image_files = [os.path.join(folder_path, file) for file in os.listdir(folder_path) if is_dicom_file(os.path.join(folder_path, file))]
+    
+    # Process each DICOM image file
+    for dicom_file_path in image_files:
+        # Coordinates of the top-left corner of the square ROI
+        point_location_x = 255
+        point_location_y = 368
+        square_origin = (int((point_location_x - (0.5 * square_size))), int((point_location_y - (0.5 * square_size))))
+        
+        # Create a new figure for each DICOM image file
+        fig, axs = plt.subplots(1, 3, figsize=(12, 6))
+        
+        # Draw square ROI on DICOM image
+        draw_square_roi_on_dicom(axs[0], dicom_file_path, square_origin, square_size)
+        
+        # Automatically calculate FWHM from the ROI
+        ct_numbers_roi, sampling_distance = calculate_ct_numbers_roi(dicom_file_path, square_origin, square_size - 1)
+        psf = generate_psf_from_roi(ct_numbers_roi)
+        fwhm_psf = fit_gaussian_to_psf(psf, sampling_distance)
+        
+        # Generate LSF from FWHM
+        n_points = len(psf)
+        lsf = generate_lsf_from_fwhm(fwhm_psf, n_points, sampling_distance)
+        
+        # Plot the LSF
+        plot_lsf(axs[1], lsf, np.arange(len(lsf)), sampling_distance, plot_type='line')
+        
+        # Plot the MTF
+        plot_mtf(axs[2], lsf, sampling_distance)
+        
+        # Title for the figure
+        fig.suptitle('DICOM Image with ROI, LSF, MTF')
+        
+        # Show the figure
+        plt.show()
 
 # Input square size
 square_size = int(input("Enter the size of the square ROI in pixels: "))
 
-# Process each DICOM file
-for dicom_file_path in dicom_files:
-    # Coordinates of the top-left corner of the square ROI
-    point_location_x = 255
-    point_location_y = 368
-    square_origin = (int((point_location_x-(0.5*square_size))), int((point_location_y-(0.5*square_size))))
-    
-    # Create a new figure for each DICOM file
-    fig, axs = plt.subplots(1, 3, figsize=(12, 6))
-    
-    # Draw square ROI on DICOM image
-    draw_square_roi_on_dicom(axs[0], dicom_file_path, square_origin, square_size)
-    
-    # Automatically calculate FWHM from the ROI
-    ct_numbers_roi, sampling_distance = calculate_ct_numbers_roi(dicom_file_path, square_origin, square_size-1)
-    psf = generate_psf_from_roi(ct_numbers_roi)
-    fwhm_psf = fit_gaussian_to_psf(psf, sampling_distance)
-    
-    # Generate LSF from FWHM
-    n_points = len(psf)
-    lsf = generate_lsf_from_fwhm(fwhm_psf, n_points, sampling_distance)
-    
-    # Plot the LSF
-    plot_lsf(axs[1], lsf, np.arange(len(lsf)), sampling_distance, plot_type='line')
-    
-    # Plot the MTF
-    plot_mtf(axs[2], lsf, sampling_distance)
-    
-    # Title for the figure
-    fig.suptitle('DICOM Image with ROI, LSF, MTF')
-    
-    # Show the figure
-    plt.show()
+# Folder path containing DICOM files
+folder_path = r'D:\Github\MPH3013-Special-Project\Coding\Images to be processed'
+
+# Process the DICOM folder
+process_dicom_folder(folder_path, square_size)

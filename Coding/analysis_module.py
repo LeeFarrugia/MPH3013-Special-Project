@@ -110,21 +110,11 @@ def plot_lsf(ax, lsf, pixel_positions, sampling_distance, plot_type='line'):
     """
     Plot the Line Spread Function (LSF).
     """
-    if plot_type == 'line':
-        # Plot as a line graph
-        ax.plot(pixel_positions, lsf)
-        ax.set_xlabel('Pixel Position')
-        ax.set_ylabel('LSF')
-        ax.set_title('Line Spread Function (LSF) - Line Graph')
-        ax.grid(True)
-    elif plot_type == 'bar':
-        # Plot as a bar graph
-        ax.bar(pixel_positions, lsf, width=1)
-        ax.set_xlabel('Pixel Position')
-        ax.set_ylabel('LSF')
-        ax.set_title('Line Spread Function (LSF) - Bar Graph')
-    else:
-        raise ValueError("Invalid plot type. Choose 'line' or 'bar'.")
+    ax.plot(pixel_positions, lsf)
+    ax.set_xlabel('Pixel Position')
+    ax.set_ylabel('LSF')
+    ax.set_title('Line Spread Function (LSF) - Line Graph')
+    ax.grid(True)
 
 def draw_square_roi_on_dicom(ax, dicom_file_path, square_origin, square_size):
     # Load DICOM file
@@ -159,6 +149,8 @@ def plot_mtf(ax, lsf, sampling_distance):
     frequencies = np.fft.fftfreq(len(mtf), d=sampling_distance)
     ax.plot(frequencies[:len(mtf) // 2], mtf[:len(mtf) // 2], label='MTF', color='red')
     ax.set_ylabel('MTF')
+    ax.set_xlabel('Spatial frequencies 1/cm')
+    ax.set_title('Modular Transform Function Graph')
     ax.legend(loc='upper right')
     ax.grid(True)
 

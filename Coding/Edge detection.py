@@ -2,6 +2,7 @@ import pydicom
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 
 def detect_phantom_central_pixel_and_edge(dicom_file_path):
     # Read DICOM file
@@ -38,7 +39,7 @@ def convert_physical_to_pixel_coordinates(physical_coordinates, pixel_spacing):
     return pixel_coordinates
 
 # Example DICOM file path
-dicom_file_path = r'D:\Github\MPH3013-Special-Project\Coding\mdh_images\PHYSICS_BODY_CATPHAN.CT.ABDOMEN_ABDOMENSEQ_(ADULT).0003.0004.2023.02.08.12.00.21.950084.6467264.IMA'
+dicom_file_path = r'D:\Github\MPH3013-Special-Project\Coding\Images to be processed\PHYSICS_CATPHAN.CT.HEAD_HEADROUTINESEQ_(ADULT).0006.0003.2023.02.08.11.59.27.521533.6462115.IMA'
 
 # Read DICOM file
 dicom = pydicom.dcmread(dicom_file_path)
@@ -60,9 +61,20 @@ below_6cm_pixel = convert_physical_to_pixel_coordinates(physical_coordinates_bel
 
 # Plot the original image with marked regions
 plt.imshow(image, cmap='gray')
-plt.scatter(central_pixel[0], central_pixel[1], c='r', label='Central Pixel')
-plt.scatter(below_6cm_pixel[0], below_6cm_pixel[1], c='b', label='Below 6cm Pixel')
-plt.plot(edge_contour[:, :, 0], edge_contour[:, :, 1], c='g', linewidth=1, label='Edge')
+
+# Find the pixel with the highest HU value
+max_hu_pixel = np.unravel_index(np.argmax(image), image.shape)
+
+# Draw square of 5x5 centered on the marked pixel using matplotlib.patches.Rectangle
+square_size = 5
+square_half_size = square_size/2  # Adjust the size if needed
+square_corner = (max_hu_pixel[1] - square_half_size, max_hu_pixel[0] - square_half_size)
+
+rect = patches.Rectangle((square_corner[0], square_corner[1]), square_size, square_size, linewidth=1, edgecolor='r', facecolor='none')
+
+plt.gca().add_patch(rect)
+
+plt.scatter(max_hu_pixel[1], max_hu_pixel[0], c='r', label='Highest HU Pixel')  # Note: numpy indices are row, column
 plt.legend()
-plt.title('Original Image with Marked Regions and Edge')
+plt.title('Original Image with Marked Regions, Edge, and Highest HU Pixel')
 plt.show()

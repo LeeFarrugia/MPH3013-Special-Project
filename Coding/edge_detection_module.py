@@ -1,3 +1,5 @@
+# edge_detection_module
+
 import pydicom
 import numpy as np
 import cv2
@@ -54,10 +56,10 @@ central_pixel, edge_contour = detect_phantom_central_pixel_and_edge(dicom_file_p
 pixel_spacing = dicom.PixelSpacing
 
 # Calculate physical coordinates 6cm below the central pixel
-physical_coordinates_below_6cm = (central_pixel[0] * pixel_spacing[0], central_pixel[1] * pixel_spacing[1] + 60)
+offset = (central_pixel[0] * pixel_spacing[0], central_pixel[1] * pixel_spacing[1] + 60)
 
 # Convert physical coordinates to pixel coordinates
-below_6cm_pixel = convert_physical_to_pixel_coordinates(physical_coordinates_below_6cm, pixel_spacing)
+below_6cm_pixel = convert_physical_to_pixel_coordinates(offset, pixel_spacing)
 
 # Plot the original image with marked regions
 plt.imshow(image, cmap='gray')

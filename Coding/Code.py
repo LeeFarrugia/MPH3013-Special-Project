@@ -8,17 +8,17 @@ from scipy.optimize import curve_fit
 
 def calculate_ct_numbers_roi(dicom_file_path, square_origin, square_size):
     # Load DICOM file
-    dicom = pydicom.dcmread(dicom_file_path)
+    dicom_data = pydicom.dcmread(dicom_file_path)
     
     # Extract image data
-    image = dicom.pixel_array
+    image = dicom_data.pixel_array
     
     # Extract Rescale Intercept and Rescale Slope
-    rescale_intercept = dicom.RescaleIntercept
-    rescale_slope = dicom.RescaleSlope
+    rescale_intercept = dicom_data.RescaleIntercept
+    rescale_slope = dicom_data.RescaleSlope
     
     # Extract pixel spacing
-    pixel_spacing = dicom.PixelSpacing
+    pixel_spacing = dicom_data.PixelSpacing
     if pixel_spacing is None or len(pixel_spacing) != 2:
         raise ValueError("Pixel spacing information is missing or incomplete.")
     pixel_spacing_x, pixel_spacing_y = map(float, pixel_spacing)
@@ -67,14 +67,14 @@ def fit_gaussian_to_psf(psf, sampling_distance):
     Fit a Gaussian curve to the Point Spread Function (PSF) and extract FWHM.
     """
     # Compute the mean value
-    mean = np.sum(psf * np.arange(len(psf))) / np.sum(psf)
+    mean_value = np.sum(psf * np.arange(len(psf))) / np.sum(psf)
     
     # Initial guess for parameters
     amplitude_guess = np.max(psf)
     stddev_guess = len(psf) / 10  # Initial guess based on the size of the PSF
     
     # Fit the Gaussian curve
-    popt, _ = curve_fit(gaussian, np.arange(len(psf)), psf, p0=[amplitude_guess, mean, stddev_guess])
+    popt, _ = curve_fit(gaussian, np.arange(len(psf)), psf, p0=[amplitude_guess, mean_value, stddev_guess])
     
     # Extract FWHM from the fitted Gaussian curve
     fwhm = 2 * np.sqrt(2 * np.log(2)) * popt[2] * sampling_distance
@@ -89,10 +89,10 @@ def generate_lsf_from_fwhm(fwhm, n_points, sampling_distance):
     sigma = fwhm / (2 * np.sqrt(2 * np.log(2)))
     
     # Generate x-axis values (equivalent to spatial coordinates)
-    x = np.linspace(-3 * sigma, 3 * sigma, n_points)
+    x_values = np.linspace(-3 * sigma, 3 * sigma, n_points)
     
     # Calculate LSF (Gaussian distribution)
-    lsf = np.exp(-x**2 / (2 * sigma**2))
+    lsf = np.exp(-x_values**2 / (2 * sigma**2))
     
     # Normalize LSF
     lsf /= np.sum(lsf)
@@ -128,10 +128,10 @@ def plot_lsf(ax, lsf, pixel_positions, sampling_distance, plot_type='line'):
 
 def draw_square_roi_on_dicom(ax, dicom_file_path, square_origin, square_size):
     # Load DICOM file
-    dicom = pydicom.dcmread(dicom_file_path)
+    dicom_data = pydicom.dcmread(dicom_file_path)
     
     # Extract image data
-    image = dicom.pixel_array
+    image = dicom_data.pixel_array
     
     # Plot the DICOM image
     ax.imshow(image, cmap='gray')

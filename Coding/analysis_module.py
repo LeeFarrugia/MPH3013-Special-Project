@@ -115,6 +115,8 @@ def plot_lsf(ax, lsf, pixel_positions, sampling_distance, plot_type='line'):
     Plot the Line Spread Function (LSF).
     """
     ax.plot(pixel_positions, lsf)
+    ax.set_xlim(left=0)
+    ax.set_ylim(bottom=0)
     ax.set_xlabel('Pixel Position')
     ax.set_ylabel('LSF')
     ax.set_title('Line Spread Function (LSF) - Line Graph')
@@ -152,6 +154,8 @@ def plot_mtf(ax, lsf, sampling_distance):
     # Plot the MTF
     frequencies = np.fft.fftfreq(len(mtf), d=sampling_distance)
     ax.plot(frequencies[:len(mtf) // 2], mtf[:len(mtf) // 2], label='MTF', color='red')
+    ax.set_xlim(left=0)
+    ax.set_ylim(bottom=0)
     ax.set_ylabel('MTF')
     ax.set_xlabel('Spatial frequencies 1/cm')
     ax.set_title('Modular Transform Function Graph')

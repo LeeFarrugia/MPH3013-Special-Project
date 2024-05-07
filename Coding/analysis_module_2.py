@@ -5,6 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import convolve
 from scipy.interpolate import interp1d
+from scipy.ndimage import gaussian_filter1d
 
 def detect_outer_edge(dicom_image):
     try:
@@ -49,49 +50,33 @@ def convert_cm_to_pixels(distance_cm, pixel_spacing):
     distance_pixels = distance_mm / pixel_spacing
     return distance_pixels
 
-from scipy.interpolate import interp1d
-
 def compute_esf(roi):
-    # Compute intensity values along the vertical axis
+    # Compute intensity values along the x-axis (horizontal axis)
     intensity_values = np.mean(roi, axis=0)
     
-    # Smooth the intensity values to reduce noise
-    smoothed_intensity = convolve(intensity_values, np.ones(5)/5, mode='same')
+    # Define the x-axis positions (upward positions of each pixel)
+    x_positions = np.arange(len(intensity_values))
     
-    # Compute the derivative of the intensity values
-    derivative = np.gradient(smoothed_intensity)
-    
-    # Calculate the cumulative sum of the derivative to obtain the ESF
-    esf = np.cumsum(derivative)
-    
-    # Interpolate the ESF to get 4 points per pixel
-    x_orig = np.arange(len(esf))
-    f = interp1d(x_orig, esf, kind='cubic')
-    x_interp = np.linspace(0, len(esf) - 1, len(esf) * 4)
+    # Interpolate the intensity values to get a smooth ESF curve
+    f = interp1d(x_positions, intensity_values, kind='cubic')
+    x_interp = np.linspace(0, len(intensity_values) - 1, len(intensity_values) * 4)
     esf_interp = f(x_interp)
     
     return esf_interp
 
-def compute_lsf(roi):
-    # Compute intensity values along the vertical axis
-    intensity_values = np.mean(roi, axis=0)
-    
-    # Smooth the intensity values to reduce noise
-    smoothed_intensity = convolve(intensity_values, np.ones(5)/5, mode='same')
-    
-    # Compute the derivative of the intensity values
-    derivative = np.gradient(smoothed_intensity)
-    
+def compute_lsf(esf):
     # Differentiate the ESF to obtain the LSF
-    lsf = np.gradient(derivative)
+    lsf = np.gradient(esf)
     
-    # Interpolate the LSF to get 4 points per pixel
-    x_orig = np.arange(len(lsf))
-    f = interp1d(x_orig, lsf, kind='cubic')
-    x_interp = np.linspace(0, len(lsf) - 1, len(lsf) * 4)
-    lsf_interp = f(x_interp)
+    # Zero the LSF tails by subtracting the average of the left-most part
+    # of the curve from all the values of the curve
+    left_part_avg = np.mean(lsf[:5])
+    lsf = lsf - left_part_avg
     
-    return lsf_interp
+    # Normalize the LSF
+    lsf = lsf / np.max(lsf)
+    
+    return lsf
 
 def analyze_dicom_folder(folder_path, roi_size):
     for file_name in os.listdir(folder_path):
@@ -105,32 +90,38 @@ def analyze_dicom_folder(folder_path, roi_size):
             outer_contour = detect_outer_edge(dicom_image)
             
             if outer_contour is not None:
+                # Create a figure with three subplots (1 row, 3 columns)
+                fig, axs = plt.subplots(1, 3, figsize=(15, 5))
+                
                 # Plot the original image
-                plt.imshow(dicom_image, cmap='gray')
+                axs[0].imshow(dicom_image, cmap='gray')
+                axs[0].set_title('Original Image')
                 
                 # Extract contour coordinates
                 x = outer_contour[:, 0, 0]
                 y = outer_contour[:, 0, 1]
                 
                 # Plot contour over original image
-                plt.plot(x, y, color='red', linewidth=2)
+                axs[0].plot(x, y, color='red', linewidth=2)
                 
                 # Find and plot contour center
                 center = find_contour_center(outer_contour)
                 if center is not None:
-                    # Calculate distance_pixels
-                    distance_pixels = convert_cm_to_pixels(6, pixel_spacing)
-                    
                     # Find the highest HU value pixel in the image
                     max_hu_pixel = np.unravel_index(np.argmax(dicom_image), dicom_image.shape)
                     
                     # Plot the highest HU value pixel in red
-                    plt.plot(max_hu_pixel[1], max_hu_pixel[0], 'ro', markersize=5)
+                    axs[0].plot(max_hu_pixel[1], max_hu_pixel[0], 'b', markersize=5)
+                    
+                    # Calculate the top-left corner coordinates of the ROI
+                    roi_top_left = (max_hu_pixel[1] - roi_size // 2, max_hu_pixel[0] - roi_size // 2)
+                    # If ROI size is odd, adjust by 1 pixel to ensure centering
+                    if roi_size % 2 != 0:
+                        roi_top_left = (roi_top_left[0] - 1, roi_top_left[1] - 1)
                     
                     # Draw ROI around the marked point
-                    roi_top_left = (max_hu_pixel[1] - roi_size // 2, max_hu_pixel[0] - roi_size // 2)
                     roi_rectangle = plt.Rectangle(roi_top_left, roi_size, roi_size, linewidth=1, edgecolor='red', facecolor='none')
-                    plt.gca().add_patch(roi_rectangle)
+                    axs[0].add_patch(roi_rectangle)
                     
                     # Extract pixels within the ROI
                     roi = dicom_image[roi_top_left[1]:roi_top_left[1] + roi_size, roi_top_left[0]:roi_top_left[0] + roi_size]
@@ -141,33 +132,35 @@ def analyze_dicom_folder(folder_path, roi_size):
                     # Plot ESF
                     pixel_positions = np.arange(len(esf))
                     mm_positions = pixel_positions * pixel_spacing
-                    plt.figure()
-                    plt.plot(mm_positions, esf, label='ESF')
+                    axs[1].plot(mm_positions, esf, label='ESF')
+                    axs[1].set_title('Edge Spread Function (ESF)')
+                    axs[1].set_xlabel('Distance (mm)')
+                    axs[1].set_ylabel('HU')
                     
                     # Compute LSF
-                    lsf = compute_lsf(roi)
+                    lsf = compute_lsf(esf)
                     
                     # Plot LSF
-                    plt.plot(mm_positions, lsf, label='LSF')
+                    axs[2].plot(mm_positions, lsf, label='LSF')
+                    axs[2].set_title('Line Spread Function (LSF)')
+                    axs[2].set_xlabel('Distance (mm)')
+                    axs[2].set_ylabel('Intensity')
                     
-                    plt.title('Edge Spread Function (ESF) and Line Spread Function (LSF)')
-                    plt.xlabel('Distance (mm)')
-                    plt.ylabel('Intensity')
-                    plt.legend()
-                    plt.grid(True)
+                    # Show legend for LSF plot
+                    axs[2].legend()
+                    
+                    # Adjust layout
+                    plt.tight_layout()
+                    
+                    # Show the figure
                     plt.show()
+                
                 
         except (pydicom.errors.InvalidDicomError, IOError) as e:
             print(f"Skipping non-DICOM file: {file_name}")
             print(f"Error: {e}")
             
 # Example usage:
-dicom_folder_path = r"C:\Users\farru\Documents\Github\MPH3013-Special-Project\Coding\Images to be processed"
-roi_size_input = int(input("Enter the size of the ROI in pixels: "))
-analyze_dicom_folder(dicom_folder_path, roi_size_input)
-
-
-# Example usage:
-dicom_folder_path = r"C:\Users\farru\Documents\Github\MPH3013-Special-Project\Coding\Images to be processed"
+dicom_folder_path = r"D:\Github\MPH3013-Special-Project\Coding\Images to be processed"
 roi_size_input = int(input("Enter the size of the ROI in pixels: "))
 analyze_dicom_folder(dicom_folder_path, roi_size_input)

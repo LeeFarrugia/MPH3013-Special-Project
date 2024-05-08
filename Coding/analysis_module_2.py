@@ -41,6 +41,65 @@ def find_contour_center(contour):
     else:
         return None
 
+def calculate_lsf(roi_ct_numbers):
+    # Calculate the Line Spread Function (LSF)
+    lsf = np.sum(roi_ct_numbers, axis=1)  # Sum along rows to simulate the LSF
+    
+    # Interpolate LSF values for a smooth curve
+    interpolated_positions = np.linspace(0, len(lsf) - 1, num=10*len(lsf))  # Interpolate 10x more points
+    interpolated_lsf = interp1d(np.arange(len(lsf)), lsf, kind='cubic')(interpolated_positions)
+    
+    # Normalize the LSF
+    normalized_lsf = (interpolated_lsf - np.min(interpolated_lsf)) / (np.max(interpolated_lsf) - np.min(interpolated_lsf))
+    
+    return normalized_lsf
+
+def calculate_mtf(normalized_lsf, pixel_spacing, image_size):
+    # Calculate the Modulation Transfer Function (MTF) using FFT
+    mtf = np.abs(np.fft.fft(normalized_lsf))
+    mtf_normalized = mtf / mtf.max()  # Normalize MTF
+    
+    # Calculate spatial frequencies
+    freq_x, freq_y = calculate_spatial_frequency(pixel_spacing, image_size)
+    freq = np.sqrt(freq_x**2 + freq_y**2)
+    
+    return freq, mtf_normalized
+
+def calculate_spatial_frequency(pixel_spacing, image_size):
+    # Calculate spatial frequency along x and y directions
+    freq_x = np.fft.fftfreq(image_size[1], pixel_spacing)
+    freq_y = np.fft.fftfreq(image_size[0], pixel_spacing)
+    return freq_x, freq_y
+
+
+def plotting(dicom_image, outer_contour, roi_top_left, roi_size, normalized_lsf, mtf_normalized, axs, pixel_spacing):
+    # Plot the original image with the outer contour and ROI
+    axs[0].imshow(dicom_image, cmap='gray')
+    x = outer_contour[:, 0, 0]
+    y = outer_contour[:, 0, 1]
+    axs[0].plot(x, y, color='red', linewidth=2)
+    roi_rectangle = plt.Rectangle(roi_top_left, roi_size, roi_size, linewidth=1, edgecolor='red', facecolor='none')
+    axs[0].add_patch(roi_rectangle)
+    axs[0].set_title('Original Image with ROI')
+    
+    # Calculate x-axis in mm
+    x_mm = np.arange(len(normalized_lsf)) * pixel_spacing
+    
+    # Plot the normalized Line Spread Function (LSF)
+    axs[1].plot(x_mm, normalized_lsf)
+    axs[1].set_xlabel('Position (mm)')
+    axs[1].set_ylabel('Normalized CT Numbers')
+    axs[1].set_title('Line Spread Function (LSF)')
+    axs[1].grid(True)
+    
+    # Plot the MTF
+    axs[2].plot(mtf_normalized)
+    axs[2].set_xlabel('Spatial Frequency (cycles/pixel)')
+    axs[2].set_ylabel('MTF')
+    axs[2].set_title('Modulation Transfer Function (MTF)')
+    axs[2].grid(True)
+
+
 def analyze_dicom_folder(folder_path, roi_size):
     for file_name in os.listdir(folder_path):
         file_path = os.path.join(folder_path, file_name)
@@ -48,24 +107,18 @@ def analyze_dicom_folder(folder_path, roi_size):
             ds = pydicom.dcmread(file_path)
             dicom_image = ds.pixel_array
             pixel_spacing = ds.PixelSpacing[0]  # Assume isotropic pixel spacing
+            image_size = dicom_image.shape
             
             # Detect outer edge of the object
             outer_contour = detect_outer_edge(dicom_image)
             
             if outer_contour is not None:
-                # Create a figure with three subplots (1 row, 3 columns)
-                fig, axs = plt.subplots(1, 3, figsize=(15, 5))
-                
-                # Plot the original image
-                axs[0].imshow(dicom_image, cmap='gray')
-                axs[0].set_title('Original Image')
+                # Create a figure with four subplots (1 row, 3 columns)
+                fig, axs = plt.subplots(1, 3)
                 
                 # Extract contour coordinates
                 x = outer_contour[:, 0, 0]
                 y = outer_contour[:, 0, 1]
-                
-                # Plot contour over original image
-                axs[0].plot(x, y, color='red', linewidth=2)
                 
                 # Find contour center
                 center = find_contour_center(outer_contour)
@@ -73,38 +126,24 @@ def analyze_dicom_folder(folder_path, roi_size):
                     # Find the highest HU value pixel in the image
                     max_hu_pixel = np.unravel_index(np.argmax(dicom_image), dicom_image.shape)
                     
-                    # Plot the highest HU value pixel in red
-                    axs[0].plot(max_hu_pixel[1], max_hu_pixel[0], 'b', markersize=5)
-                    
                     # Calculate the top-left corner coordinates of the ROI
                     roi_top_left = (max_hu_pixel[1] - roi_size // 2, max_hu_pixel[0] - roi_size // 2)
                     # If ROI size is odd, adjust by 1 pixel to ensure centering
                     if roi_size % 2 != 0:
                         roi_top_left = (roi_top_left[0] - 1, roi_top_left[1] - 1)
                     
-                    # Draw ROI around the marked point
-                    roi_rectangle = plt.Rectangle(roi_top_left, roi_size, roi_size, linewidth=1, edgecolor='red', facecolor='none')
-                    axs[0].add_patch(roi_rectangle)
-                    
                     # Extract CT numbers within the automatically drawn ROI
                     roi_ct_numbers = ds.pixel_array[roi_top_left[1]:roi_top_left[1] + roi_size, roi_top_left[0]:roi_top_left[0] + roi_size]
                     
-                    # Calculate the Line Spread Function (LSF)
-                    lsf = np.sum(roi_ct_numbers, axis=1)  # Sum along rows to simulate the LSF
+                    # Calculate LSF
+                    normalized_lsf = calculate_lsf(roi_ct_numbers)
                     
-                    # Interpolate LSF values for a smooth curve
-                    interpolated_positions = np.linspace(0, len(lsf) - 1, num=10*len(lsf))  # Interpolate 10x more points
-                    interpolated_lsf = interp1d(np.arange(len(lsf)), lsf, kind='cubic')(interpolated_positions)
+                    # Calculate MTF
+                    freq, mtf_normalized = calculate_mtf(normalized_lsf, pixel_spacing, image_size)
+
                     
-                    # Normalize the LSF
-                    normalized_lsf = (interpolated_lsf - np.min(interpolated_lsf)) / (np.max(interpolated_lsf) - np.min(interpolated_lsf))
-                    
-                    # Plot the normalized Line Spread Function (LSF)
-                    axs[1].plot(normalized_lsf)
-                    axs[1].set_xlabel('Pixel Position')
-                    axs[1].set_ylabel('Normalized CT Numbers')
-                    axs[1].set_title('Smoothed and Normalized Line Spread Function (LSF) - CT Numbers')
-                    axs[1].grid(True)
+                    # Plotting
+                    plotting(dicom_image, outer_contour, roi_top_left, roi_size, normalized_lsf, mtf_normalized, axs, pixel_spacing)
                     
                     # Show the figure
                     plt.tight_layout()

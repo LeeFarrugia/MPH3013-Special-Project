@@ -48,22 +48,24 @@ def calculate_lsf(roi_ct_numbers):
     # Interpolate LSF values for a smooth curve
     interpolated_positions = np.linspace(0, len(lsf) - 1, num=10*len(lsf))  # Interpolate 10x more points
     interpolated_lsf = interp1d(np.arange(len(lsf)), lsf, kind='cubic')(interpolated_positions)
+
+    # Get the smallest 5 values of the interpolated LSF
+    smallest_values = np.partition(interpolated_lsf, 5)[:5]
+   
+    # Calculate the average of the smallest 5 values
+    average_smallest_values = np.mean(smallest_values)
     
     # Normalize the LSF
-    normalized_lsf = (interpolated_lsf - np.min(interpolated_lsf)) / (np.max(interpolated_lsf) - np.min(interpolated_lsf))
+    normalized_lsf = (interpolated_lsf - average_smallest_values) / (np.max(interpolated_lsf) - average_smallest_values)
     
     return normalized_lsf
 
-def calculate_mtf(normalized_lsf, pixel_spacing, image_size):
+def calculate_mtf(normalized_lsf):
     # Calculate the Modulation Transfer Function (MTF) using FFT
     mtf = np.abs(np.fft.fft(normalized_lsf))
     mtf_normalized = mtf / mtf.max()  # Normalize MTF
     
-    # Calculate spatial frequencies
-    freq_x, freq_y = calculate_spatial_frequency(pixel_spacing, image_size)
-    freq = np.sqrt(freq_x**2 + freq_y**2)
-    
-    return freq, mtf_normalized
+    return mtf_normalized
 
 def calculate_spatial_frequency(pixel_spacing, image_size):
     # Calculate spatial frequency along x and y directions
@@ -84,6 +86,10 @@ def plotting(dicom_image, outer_contour, roi_top_left, roi_size, normalized_lsf,
     
     # Calculate x-axis in mm
     x_mm = np.arange(len(normalized_lsf)) * pixel_spacing
+
+    # Calculate spatial frequencies in cycles/mm
+    freq_mm = np.fft.fftfreq(len(normalized_lsf), d=pixel_spacing)
+    freq_mm = np.abs(freq_mm * (1 / pixel_spacing))
     
     # Plot the normalized Line Spread Function (LSF)
     axs[1].plot(x_mm, normalized_lsf)
@@ -93,8 +99,8 @@ def plotting(dicom_image, outer_contour, roi_top_left, roi_size, normalized_lsf,
     axs[1].grid(True)
     
     # Plot the MTF
-    axs[2].plot(mtf_normalized)
-    axs[2].set_xlabel('Spatial Frequency (cycles/pixel)')
+    axs[2].plot(freq_mm, mtf_normalized)
+    axs[2].set_xlabel('Spatial Frequency (cycles/mm)')
     axs[2].set_ylabel('MTF')
     axs[2].set_title('Modulation Transfer Function (MTF)')
     axs[2].grid(True)
@@ -107,7 +113,6 @@ def analyze_dicom_folder(folder_path, roi_size):
             ds = pydicom.dcmread(file_path)
             dicom_image = ds.pixel_array
             pixel_spacing = ds.PixelSpacing[0]  # Assume isotropic pixel spacing
-            image_size = dicom_image.shape
             
             # Detect outer edge of the object
             outer_contour = detect_outer_edge(dicom_image)
@@ -115,10 +120,6 @@ def analyze_dicom_folder(folder_path, roi_size):
             if outer_contour is not None:
                 # Create a figure with four subplots (1 row, 3 columns)
                 fig, axs = plt.subplots(1, 3)
-                
-                # Extract contour coordinates
-                x = outer_contour[:, 0, 0]
-                y = outer_contour[:, 0, 1]
                 
                 # Find contour center
                 center = find_contour_center(outer_contour)
@@ -139,8 +140,7 @@ def analyze_dicom_folder(folder_path, roi_size):
                     normalized_lsf = calculate_lsf(roi_ct_numbers)
                     
                     # Calculate MTF
-                    freq, mtf_normalized = calculate_mtf(normalized_lsf, pixel_spacing, image_size)
-
+                    mtf_normalized = calculate_mtf(normalized_lsf)
                     
                     # Plotting
                     plotting(dicom_image, outer_contour, roi_top_left, roi_size, normalized_lsf, mtf_normalized, axs, pixel_spacing)

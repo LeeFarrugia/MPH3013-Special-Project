@@ -70,8 +70,7 @@ def calculate_mtf(normalized_lsf):
 def calculate_spatial_frequency(pixel_spacing, image_size):
     # Calculate spatial frequency along x and y directions
     freq_x = np.fft.fftfreq(image_size[1], pixel_spacing)
-    freq_y = np.fft.fftfreq(image_size[0], pixel_spacing)
-    return freq_x, freq_y
+    return freq_x
 
 
 def plotting(dicom_image, outer_contour, roi_top_left, roi_size, normalized_lsf, mtf_normalized, axs, pixel_spacing):

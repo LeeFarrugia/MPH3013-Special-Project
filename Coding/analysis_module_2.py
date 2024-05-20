@@ -56,7 +56,7 @@ def calculate_lsf(roi_ct_numbers):
 
 def calculate_mtf(normalized_lsf):
     mtf = np.abs(np.fft.fft(normalized_lsf))
-    mtf_normalized = mtf / mtf[0]  # Normalize by the DC component
+    mtf_normalized = mtf / max(mtf)
     
     return mtf_normalized
 

@@ -181,7 +181,7 @@ def analysis_folder(folder_path, roi_size=16):
         # Print spatial frequencies corresponding to specific MTF values
         spatial_freq_values = calculate_spatial_frequencies(mtf_interp, x_mtf_interp)
         for mtf_value, spatial_freq in spatial_freq_values.items():
-            print(f"Spatial frequency for MTF {mtf_value}: {spatial_freq:.2f}")
+            print(f"Spatial frequency at MTF {mtf_value*100}%: {spatial_freq:.2f}")
 
         # Plot LSF, ESF, MTF curves and DICOM image
         plot_lsf_esf_mtf_image(image, lsf, esf, mtf, ds, roi_x, roi_y, roi_size)

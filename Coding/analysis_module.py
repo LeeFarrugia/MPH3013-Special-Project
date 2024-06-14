@@ -1,7 +1,10 @@
+# analysis_module.py
+
 import os
 import pydicom
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_pdf import PdfPages
 from scipy.fft import fft
 import cv2
 from scipy.interpolate import PchipInterpolator, CubicSpline
@@ -81,7 +84,7 @@ def find_outer_contour(image):
 
 def plot_lsf_esf_mtf_image(image, lsf, esf, mtf, ds, roi_x, roi_y, roi_size=16):
     """ Plot LSF, ESF, MTF curves and the DICOM image with contour """
-    fig, axs = plt.subplots(nrows=3, ncols=2, figsize=(15, 10))
+    fig, axs = plt.subplots(nrows=3, ncols=2, figsize=(15, 12))
 
     # Plot DICOM image with contour and ROI square
     axs[1,0].imshow(image, cmap='gray')
@@ -99,7 +102,7 @@ def plot_lsf_esf_mtf_image(image, lsf, esf, mtf, ds, roi_x, roi_y, roi_size=16):
     # Interpolate LSF
     x_lsf = np.arange(len(lsf))
     x_lsf_interp, lsf_interp = interpolate_data(x_lsf, lsf)
-    axs[0,1].plot(x_lsf_interp, lsf_interp)
+    axs[0,1].plot(x_lsf_interp, lsf_interp, color ='k')
     axs[0,1].set_title('Line Spread Function (LSF)')
     axs[0,1].set_xlabel('Pixel Position')
     axs[0,1].set_ylabel('Intensity')
@@ -108,7 +111,7 @@ def plot_lsf_esf_mtf_image(image, lsf, esf, mtf, ds, roi_x, roi_y, roi_size=16):
     # Interpolate ESF
     x_esf = np.arange(len(esf))
     x_esf_interp, esf_interp = interpolate_data(x_esf, esf)
-    axs[1,1].plot(x_esf_interp, esf_interp)
+    axs[1,1].plot(x_esf_interp, esf_interp, color ='k')
     axs[1,1].set_title('Edge Spread Function (ESF)')
     axs[1,1].set_xlabel('Pixel Position')
     axs[1,1].set_ylabel('Cumulative Intensity')
@@ -118,7 +121,7 @@ def plot_lsf_esf_mtf_image(image, lsf, esf, mtf, ds, roi_x, roi_y, roi_size=16):
     x_mtf = np.fft.fftfreq(len(mtf))
     x_mtf_interp, mtf_interp = mtf_interpolate_data(x_mtf[:len(mtf)//2], mtf[:len(mtf)//2])
     mtf_interp_normalized = renormalize_mtf(mtf_interp)
-    axs[2,1].plot(x_mtf_interp, mtf_interp_normalized)
+    axs[2,1].plot(x_mtf_interp, mtf_interp_normalized, color ='k')
     axs[2,1].set_title('Modulation Transfer Function (MTF)')
     axs[2,1].set_xlabel('Spatial Frequency')
     axs[2,1].set_ylabel('MTF')
@@ -131,8 +134,28 @@ def plot_lsf_esf_mtf_image(image, lsf, esf, mtf, ds, roi_x, roi_y, roi_size=16):
     axs[0,0].axis('off')
     axs[2,0].axis('off')
 
+    # Calculate spatial frequencies corresponding to specific MTF values
+    spatial_freq_values = calculate_spatial_frequencies(mtf_interp, x_mtf_interp)
+    
+    # Add spatial frequencies as a table
+    table_data = [["MTF 50%", f"{spatial_freq_values[0.50]:.2f}"],
+                  ["MTF 25%", f"{spatial_freq_values[0.25]:.2f}"],
+                  ["MTF 10%", f"{spatial_freq_values[0.10]:.2f}"],
+                  ["MTF 2%", f"{spatial_freq_values[0.02]:.2f}"]]
+    
+    table = axs[2,0].table(cellText=table_data,
+                          colLabels=["MTF (%)", "Spatial Frequency"],
+                          cellLoc='center',
+                          loc='center',
+                          colWidths=[0.2, 0.3])
+    
+    table.auto_set_font_size(False)
+    table.set_fontsize(10)
+    table.scale(1.2, 1.2)
+
     plt.tight_layout()
-    plt.show()
+
+    return fig
 
 def calculate_spatial_frequencies(mtf_interp, x_interp):
     """ Calculate spatial frequencies corresponding to specific MTF values """
@@ -146,8 +169,13 @@ def calculate_spatial_frequencies(mtf_interp, x_interp):
     
     return spatial_freq_values
 
-def analysis_folder(folder_path, roi_size=16):
-    """ Process all DICOM images in a folder, calculate MTF, and print spatial frequencies """
+def analysis_folder(folder_path, roi_size=16, output_folder=None):
+    """ Process all DICOM images in a folder, calculate MTF """
+    # Ensure output folder exists
+    if output_folder is None:
+        output_folder = os.getcwd()
+    os.makedirs(output_folder, exist_ok=True)
+
     # Iterate over all files in the folder
     for filename in os.listdir(folder_path):
         file_path = os.path.join(folder_path, filename)
@@ -178,17 +206,11 @@ def analysis_folder(folder_path, roi_size=16):
         x_mtf = np.fft.fftfreq(len(mtf))
         x_mtf_interp, mtf_interp = mtf_interpolate_data(x_mtf[:len(mtf)//2], mtf[:len(mtf)//2])
 
-        # Print spatial frequencies corresponding to specific MTF values
-        spatial_freq_values = calculate_spatial_frequencies(mtf_interp, x_mtf_interp)
-        for mtf_value, spatial_freq in spatial_freq_values.items():
-            print(f"Spatial frequency at MTF {mtf_value*100}%: {spatial_freq:.2f}")
-
         # Plot LSF, ESF, MTF curves and DICOM image
-        plot_lsf_esf_mtf_image(image, lsf, esf, mtf, ds, roi_x, roi_y, roi_size)
+        fig = plot_lsf_esf_mtf_image(image, lsf, esf, mtf, ds, roi_x, roi_y, roi_size)
 
-# Input folder path and ROI size
-folder_path = r'D:\Github\MPH3013-Special-Project\Coding\Images to be processed'
-roi_size = int(input("Enter ROI size (integer value): "))
-
-analysis_folder(folder_path, roi_size)
-print('Analysis of all images is complete.')
+        # Save figure to PDF in output folder
+        output_file = os.path.join(output_folder, f"{os.path.splitext(filename)[0]}_analysis.pdf")
+        with PdfPages(output_file) as pdf:
+            pdf.savefig(fig)
+            plt.close(fig)

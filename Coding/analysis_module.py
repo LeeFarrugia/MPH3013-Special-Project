@@ -1,242 +1,216 @@
+# analysis_module.py
+
 import os
 import pydicom
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-from pydicom.errors import InvalidDicomError
-from scipy.optimize import curve_fit
+from matplotlib.backends.backend_pdf import PdfPages
+from scipy.fft import fft
+import cv2
+from scipy.interpolate import PchipInterpolator, CubicSpline
 
-def calculate_ct_numbers_roi(dicom_file_path, square_origin, square_size):
-    # Load DICOM file
-    dicom_data = pydicom.dcmread(dicom_file_path)
-    
-    # Extract image data
-    image = dicom_data.pixel_array
-    
-    # Extract Rescale Intercept and Rescale Slope
-    rescale_intercept = dicom_data.RescaleIntercept
-    rescale_slope = dicom_data.RescaleSlope
-    
-    # Extract pixel spacing
-    pixel_spacing = dicom_data.PixelSpacing
-    if pixel_spacing is None or len(pixel_spacing) != 2:
-        raise ValueError("Pixel spacing information is missing or incomplete.")
-    pixel_spacing_x, pixel_spacing_y = map(float, pixel_spacing)
-    
-    # Calculate the sampling distance (cm per sample)
-    sampling_distance = max(pixel_spacing_x, pixel_spacing_y)
-    
-    # Extract square coordinates
-    x0, y0 = square_origin
-    # Define the square ROI coordinates
-    x0 = int(x0)
-    y0 = int(y0)
-    x1 = int(x0 + square_size)
-    y1 = int(y0 + square_size)
-    
-    # Crop the image to the ROI
-    roi_image = image[y0:y1, x0:x1]
-    
-    # Calculate CT numbers for each pixel in the ROI
-    ct_numbers_roi = (roi_image * rescale_slope) + rescale_intercept
-    
-    return ct_numbers_roi, sampling_distance
+def load_dicom_image(file_path):
+    """ Load DICOM image and return pixel array """
+    ds = pydicom.dcmread(file_path)
+    return ds.pixel_array.astype(np.float64), ds
 
-def generate_psf_from_roi(ct_numbers_roi):
-    """
-    Generate the Point Spread Function (PSF) from the ROI CT numbers.
-    """
-    # Calculate the Line Spread Function (LSF)
-    lsf = np.diff(ct_numbers_roi, axis=1)
-    
-    # Integrate to get the Point Spread Function (PSF)
-    psf = np.cumsum(lsf, axis=1)
-    
-    # Flatten the PSF to 1D
-    psf = psf.flatten()
-    
-    return psf
+def find_max_hu_value(image):
+    """ Find the maximum HU value in the image """
+    return np.max(image)
 
-def gaussian(x, amplitude, mean, stddev):
-    """
-    Gaussian function.
-    """
-    return amplitude * np.exp(-(x - mean)**2 / (2 * stddev**2))
-
-def fit_gaussian_to_psf(psf, sampling_distance):
-    """
-    Fit a Gaussian curve to the Point Spread Function (PSF) and extract FWHM.
-    """
-    
-    # Initial guess for parameters
-    amplitude_guess = np.max(psf)
-    stddev_guess = len(psf) / 10  # Initial guess based on the size of the PSF
-
-    # Adjust initial guesses for parameters
-    amplitude_guess = np.max(psf)
-    mean_guess = np.argmax(psf)  # Initial guess based on the peak of the PSF
-    stddev_guess = len(psf) / 10  # Initial guess based on the size of the PSF
-
-    # Fit the Gaussian curve with adjusted initial guesses
-    popt, _ = curve_fit(gaussian, np.arange(len(psf)), psf, p0=[amplitude_guess, mean_guess, stddev_guess], maxfev=500000)
-    
-    # Extract FWHM from the fitted Gaussian curve
-    fwhm = 2 * np.sqrt(2 * np.log(2)) * popt[2] * sampling_distance
-    
-    return fwhm
-
-def generate_lsf_from_fwhm(fwhm, n_points, sampling_distance):
-    """
-    Generate a Line Spread Function (LSF) from the Full Width at Half Maximum (FWHM).
-    """
-    # Calculate sigma from FWHM (FWHM = 2 * sqrt(2 * ln(2)) * sigma)
-    sigma = fwhm / (2 * np.sqrt(2 * np.log(2)))
-    
-    # Generate x-axis values (equivalent to spatial coordinates)
-    x_values = np.linspace(-3 * sigma, 3 * sigma, n_points)
-    
-    # Calculate LSF (Gaussian distribution)
-    lsf = np.exp(-x_values**2 / (2 * sigma**2))
-    
-    # Normalize LSF
-    lsf /= np.sum(lsf)
-    
+def calculate_lsf(roi):
+    """ Calculate Line Spread Function (LSF) using edge detection """
+    edges = cv2.Sobel(roi, cv2.CV_64F, 1, 0, ksize=5)
+    lsf = np.mean(edges, axis=0)
     return lsf
 
-def calculate_mtf_from_lsf(lsf):
-    """
-    Calculate the Modulation Transfer Function (MTF) from the Line Spread Function (LSF).
-    """
-    mtf = np.abs(np.fft.fft(lsf))
+def calculate_esf(lsf):
+    """ Calculate Edge Spread Function (ESF) from LSF """
+    esf = np.cumsum(lsf)
+    return esf
+
+def calculate_mtf(esf):
+    """ Calculate Modulation Transfer Function (MTF) from ESF """
+    mtf = np.abs(fft(esf))
+    mtf = mtf / np.max(mtf)  # Normalize MTF to range [0, 1]
     return mtf
 
-def plot_lsf(ax, lsf, pixel_positions, sampling_distance, plot_type='line'):
-    """
-    Plot the Line Spread Function (LSF).
-    """
-    ax.plot(pixel_positions, lsf)
-    ax.set_xlim(left=0)
-    ax.set_ylim(bottom=0)
-    ax.set_xlabel('Pixel Position')
-    ax.set_ylabel('LSF')
-    ax.set_title('Line Spread Function (LSF) - Line Graph')
-    ax.grid(True)
+def interpolate_data(x, y, num_points=100):
+    """ Interpolate data using CubicSpline """
+    cs = CubicSpline(x, y)
+    x_interp = np.linspace(x.min(), x.max(), num=num_points)
+    y_interp = cs(x_interp)
+    return x_interp, y_interp
 
-def draw_square_roi_on_dicom(ax, dicom_file_path, square_origin, square_size):
-    # Load DICOM file
-    dicom_data = pydicom.dcmread(dicom_file_path)
-    
-    # Extract image data
-    image = dicom_data.pixel_array
-    
-    # Plot the DICOM image
-    ax.imshow(image, cmap='gray')
-    ax.set_title('DICOM Image with Square ROI')
-    
-    # Extract square coordinates
-    x0, y0 = square_origin
-    
-    # Define the square ROI coordinates
-    x1 = x0 + square_size
-    y1 = y0 + square_size
-    
-    # Plot the rectangle ROI on the image
-    rect = patches.Rectangle((x0, y0), square_size, square_size, linewidth=1, edgecolor='r', facecolor='none')
-    ax.add_patch(rect)
+def mtf_interpolate_data(x, y, num_points=1000):
+    """ Interpolate data using PchipInterpolator """
+    f = PchipInterpolator(x, y)
+    x_interp = np.linspace(x.min(), x.max(), num=num_points)
+    y_interp = f(x_interp)
+    return x_interp, y_interp
 
-def plot_mtf(ax, lsf, sampling_distance):
-    """
-    Plot the Modulation Transfer Function (MTF).
-    """
-    # Calculate MTF from LSF
-    mtf = calculate_mtf_from_lsf(lsf)
-    
-    # Plot the MTF
-    frequencies = np.fft.fftfreq(len(mtf), d=sampling_distance)
-    ax.plot(frequencies[:len(mtf) // 2], mtf[:len(mtf) // 2], label='MTF', color='red')
-    ax.set_xlim(left=0)
-    ax.set_ylim(bottom=0)
-    ax.set_ylabel('MTF')
-    ax.set_xlabel('Spatial frequencies 1/cm')
-    ax.set_title('Modular Transform Function Graph')
-    ax.legend(loc='upper right')
-    ax.grid(True)
+def renormalize_mtf(mtf_interp):
+    """ Renormalize MTF after interpolation """
+    max_value = np.max(mtf_interp)
+    return mtf_interp / max_value
 
-def is_dicom_file(file_path):
+def find_outer_contour(image):
+    """ Find outer contour of object in the image """
     try:
-        pydicom.dcmread(file_path)
-        return True
-    except (InvalidDicomError, IOError):
-        return False
+        # Check if the image is grayscale
+        if len(image.shape) > 2:
+            # Convert DICOM image to grayscale
+            dicom_image_gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        else:
+            dicom_image_gray = image
+        
+        # Ensure the image is of type CV_8U
+        dicom_image_gray = cv2.convertScaleAbs(dicom_image_gray)
+        
+        # Apply Canny edge detection
+        edge_image = cv2.Canny(dicom_image_gray, 100, 200)
+        
+        # Find contours in the binary edge image
+        contours, _ = cv2.findContours(edge_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        # Filter contours to find the outermost contour
+        contour = max(contours, key=cv2.contourArea)
 
-def process_dicom_folder(folder_path, square_size):
-    # List image files in the folder
-    image_files = [os.path.join(folder_path, file) for file in os.listdir(folder_path)]
+        return contour
+  
+    except Exception as e:
+        print(f"An error occurred while detecting the outer edge: {e}")
+        return None
+
+def plot_lsf_esf_mtf_image(image, lsf, esf, mtf, ds, roi_x, roi_y, roi_size=16):
+    """ Plot LSF, ESF, MTF curves and the DICOM image with contour """
+    fig, axs = plt.subplots(nrows=3, ncols=2, figsize=(15, 12))
+
+    # Plot DICOM image with contour and ROI square
+    axs[1,0].imshow(image, cmap='gray')
+    contour = find_outer_contour(image)
+    axs[1,0].plot(contour[:, 0, 0], contour[:, 0, 1], '-r', linewidth=1)
     
-    # Process each file in the folder
-    for file_path in image_files:
-        if not is_dicom_file(file_path):
-            print(f"Skipping non-DICOM file: {file_path}")
-            continue
-        
-        # Process DICOM files
-        dicom_file_path = file_path
+    # Draw ROI square in red
+    roi_rect = plt.Rectangle((roi_x - roi_size//2, roi_y - roi_size//2), roi_size, roi_size, 
+                             linewidth=1, edgecolor='r', facecolor='none')
+    axs[1,0].add_patch(roi_rect)
+    
+    axs[1,0].set_title('DICOM Image')
+    axs[1,0].axis('off')
 
-        # Read DICOM file
-        dicom = pydicom.dcmread(dicom_file_path)
+    # Interpolate LSF
+    x_lsf = np.arange(len(lsf))
+    x_lsf_interp, lsf_interp = interpolate_data(x_lsf, lsf)
+    axs[0,1].plot(x_lsf_interp, lsf_interp, color ='k')
+    axs[0,1].set_title('Line Spread Function (LSF)')
+    axs[0,1].set_xlabel('Pixel Position')
+    axs[0,1].set_ylabel('Intensity')
+    axs[0,1].grid()
 
-        # Extract pixel array
-        image = dicom.pixel_array
+    # Interpolate ESF
+    x_esf = np.arange(len(esf))
+    x_esf_interp, esf_interp = interpolate_data(x_esf, esf)
+    axs[1,1].plot(x_esf_interp, esf_interp, color ='k')
+    axs[1,1].set_title('Edge Spread Function (ESF)')
+    axs[1,1].set_xlabel('Pixel Position')
+    axs[1,1].set_ylabel('Cumulative Intensity')
+    axs[1,1].grid()
 
-        max_hu_pixel = np.unravel_index(np.argmax(image), image.shape)
-        
-        # Coordinates of the top-left corner of the square ROI
-        square_half_size = square_size/2  # Adjust the size if needed
-        square_origin = (max_hu_pixel[1] - square_half_size, max_hu_pixel[0] - square_half_size)
-        
-        # Create a new figure for each DICOM image file
-        fig, axs = plt.subplots(1, 3, figsize=(12, 6))
-        
-        # Draw square ROI on DICOM image
-        draw_square_roi_on_dicom(axs[0], dicom_file_path, square_origin, square_size)
-        
-        # Automatically calculate FWHM from the ROI
-        ct_numbers_roi, sampling_distance = calculate_ct_numbers_roi(dicom_file_path, square_origin, square_size - 1)
-        psf = generate_psf_from_roi(ct_numbers_roi)
-        fwhm_psf = fit_gaussian_to_psf(psf, sampling_distance)
-        
-        # Generate LSF from FWHM
-        n_points = len(psf)
-        lsf = generate_lsf_from_fwhm(fwhm_psf, n_points, sampling_distance)
-        
-        # Plot the LSF
-        plot_lsf(axs[1], lsf, np.arange(len(lsf)), sampling_distance, plot_type='line')
-        
-        # Plot the MTF
-        plot_mtf(axs[2], lsf, sampling_distance)
-        
-        # Title for the figure
-        fig.suptitle('DICOM Image with ROI, LSF, MTF')
-        
-        # Show the figure
-        plt.show()
+    # Interpolate MTF
+    x_mtf = np.fft.fftfreq(len(mtf))
+    x_mtf_interp, mtf_interp = mtf_interpolate_data(x_mtf[:len(mtf)//2], mtf[:len(mtf)//2])
+    mtf_interp_normalized = renormalize_mtf(mtf_interp)
+    axs[2,1].plot(x_mtf_interp, mtf_interp_normalized, color ='k')
+    axs[2,1].set_title('Modulation Transfer Function (MTF)')
+    axs[2,1].set_xlabel('Spatial Frequency')
+    axs[2,1].set_ylabel('MTF')
+    axs[2,1].grid()
 
-def get_positive_integer_input(prompt):
-    while True:
-        try:
-            value = int(input(prompt))
-            if value <= 0:
-                print("Please enter a positive integer.")
-                continue
-            return value
-        except ValueError:
-            print("Please enter a valid integer.")
+    # Set y-axis ticks for MTF plot
+    axs[2,1].set_yticks(np.arange(0, 1.1, 0.1))
 
-# Input square size
-square_size = get_positive_integer_input("Enter the size of the square ROI in pixels: ")
+    # Hide unused axis
+    axs[0,0].axis('off')
+    axs[2,0].axis('off')
 
-# Folder path containing DICOM files
-folder_path = r'D:\Github\MPH3013-Special-Project\Coding\Images to be processed'
+    # Calculate spatial frequencies corresponding to specific MTF values
+    spatial_freq_values = calculate_spatial_frequencies(mtf_interp, x_mtf_interp)
+    
+    # Add spatial frequencies as a table
+    table_data = [["MTF 50%", f"{spatial_freq_values[0.50]:.2f}"],
+                  ["MTF 25%", f"{spatial_freq_values[0.25]:.2f}"],
+                  ["MTF 10%", f"{spatial_freq_values[0.10]:.2f}"],
+                  ["MTF 2%", f"{spatial_freq_values[0.02]:.2f}"]]
+    
+    table = axs[2,0].table(cellText=table_data,
+                          colLabels=["MTF (%)", "Spatial Frequency"],
+                          cellLoc='center',
+                          loc='center',
+                          colWidths=[0.2, 0.3])
+    
+    table.auto_set_font_size(False)
+    table.set_fontsize(10)
+    table.scale(1.2, 1.2)
 
-# Process the DICOM folder
-process_dicom_folder(folder_path, square_size)
+    plt.tight_layout()
+
+    return fig
+
+def calculate_spatial_frequencies(mtf_interp, x_interp):
+    """ Calculate spatial frequencies corresponding to specific MTF values """
+    spatial_freq_values = {}
+    
+    # Find spatial frequencies corresponding to MTF values of interest
+    for mtf_value in [0.50, 0.25, 0.10, 0.02]:
+        # Find the nearest index where MTF is closest to the desired value
+        idx = np.argmin(np.abs(mtf_interp - mtf_value))
+        spatial_freq_values[mtf_value] = x_interp[idx]
+    
+    return spatial_freq_values
+
+def analysis_folder(folder_path, roi_size=16, output_folder=None):
+    """ Process all DICOM images in a folder, calculate MTF """
+    # Ensure output folder exists
+    if output_folder is None:
+        output_folder = os.getcwd()
+    os.makedirs(output_folder, exist_ok=True)
+
+    # Iterate over all files in the folder
+    for filename in os.listdir(folder_path):
+        file_path = os.path.join(folder_path, filename)
+        print(f"Processing file: {file_path}")
+        image, ds = load_dicom_image(file_path)
+
+        # Find maximum HU value
+        max_hu_value = find_max_hu_value(image)
+
+        # Find coordinates of the maximum HU value in the image
+        high_hu_pixels = np.where(image == max_hu_value)
+        roi_x, roi_y = high_hu_pixels[1][0], high_hu_pixels[0][0]
+
+        # Extract ROI around the high HU pixel
+        roi = image[roi_y - roi_size//2 : roi_y + roi_size//2,
+                       roi_x - roi_size//2 : roi_x + roi_size//2]
+
+        # Calculate LSF (Line Spread Function)
+        lsf = calculate_lsf(roi)
+
+        # Calculate ESF (Edge Spread Function)
+        esf = calculate_esf(lsf)
+
+        # Calculate MTF (Modulation Transfer Function)
+        mtf = calculate_mtf(esf)
+
+        # Interpolate MTF data
+        x_mtf = np.fft.fftfreq(len(mtf))
+        x_mtf_interp, mtf_interp = mtf_interpolate_data(x_mtf[:len(mtf)//2], mtf[:len(mtf)//2])
+
+        # Plot LSF, ESF, MTF curves and DICOM image
+        fig = plot_lsf_esf_mtf_image(image, lsf, esf, mtf, ds, roi_x, roi_y, roi_size)
+
+        # Save figure to PDF in output folder
+        output_file = os.path.join(output_folder, f"{os.path.splitext(filename)[0]}_analysis.pdf")
+        with PdfPages(output_file) as pdf:
+            pdf.savefig(fig)
+            plt.close(fig)

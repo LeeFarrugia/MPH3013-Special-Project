@@ -1,3 +1,5 @@
+#gui
+
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from analysis_module import analysis_folder

@@ -8,6 +8,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 from scipy.fft import fft
 import cv2
 from scipy.interpolate import PchipInterpolator, CubicSpline
+from collections import defaultdict
 
 def load_dicom_image(file_path):
     """ Load DICOM image and return pixel array """
@@ -42,10 +43,10 @@ def interpolate_data(x, y, num_points=100):
     y_interp = cs(x_interp)
     return x_interp, y_interp
 
-def mtf_interpolate_data(x, y, num_points=1000):
-    """ Interpolate data using PchipInterpolator """
-    f = PchipInterpolator(x, y)
-    x_interp = np.linspace(x.min(), x.max(), num=num_points)
+def mtf_interpolate_data(x, y, num_points=1000, scale_factor=10):
+    """ Interpolate data using PchipInterpolator and convert to cycles/cm """
+    f = PchipInterpolator(x * scale_factor, y)  # Convert x-axis to cycles/cm
+    x_interp = np.linspace((x * scale_factor).min(), (x * scale_factor).max(), num=num_points)
     y_interp = f(x_interp)
     return x_interp, y_interp
 
@@ -82,7 +83,7 @@ def find_outer_contour(image):
         print(f"An error occurred while detecting the outer edge: {e}")
         return None
 
-def plot_lsf_esf_mtf_image(image, lsf, esf, mtf, ds, roi_x, roi_y, roi_size=16):
+def plot_lsf_esf_mtf_image(image, lsf, esf, mtf, ds, roi_x, roi_y, std_sr, roi_size=16):
     """ Plot LSF, ESF, MTF curves and the DICOM image with contour """
     fig, axs = plt.subplots(nrows=3, ncols=2, figsize=(15, 12))
 
@@ -105,7 +106,7 @@ def plot_lsf_esf_mtf_image(image, lsf, esf, mtf, ds, roi_x, roi_y, roi_size=16):
     axs[0,1].plot(x_lsf_interp, lsf_interp, color ='k')
     axs[0,1].set_title('Line Spread Function (LSF)')
     axs[0,1].set_xlabel('Pixel Position')
-    axs[0,1].set_ylabel('Intensity')
+    axs[0,1].set_ylabel('Intensity (HU)')
     axs[0,1].grid()
 
     # Interpolate ESF
@@ -114,7 +115,7 @@ def plot_lsf_esf_mtf_image(image, lsf, esf, mtf, ds, roi_x, roi_y, roi_size=16):
     axs[1,1].plot(x_esf_interp, esf_interp, color ='k')
     axs[1,1].set_title('Edge Spread Function (ESF)')
     axs[1,1].set_xlabel('Pixel Position')
-    axs[1,1].set_ylabel('Cumulative Intensity')
+    axs[1,1].set_ylabel('Cumulative Intensity (HU)')
     axs[1,1].grid()
 
     # Interpolate MTF
@@ -123,7 +124,7 @@ def plot_lsf_esf_mtf_image(image, lsf, esf, mtf, ds, roi_x, roi_y, roi_size=16):
     mtf_interp_normalized = renormalize_mtf(mtf_interp)
     axs[2,1].plot(x_mtf_interp, mtf_interp_normalized, color ='k')
     axs[2,1].set_title('Modulation Transfer Function (MTF)')
-    axs[2,1].set_xlabel('Spatial Frequency')
+    axs[2,1].set_xlabel('Spatial Frequency (cycles/cm)')
     axs[2,1].set_ylabel('MTF')
     axs[2,1].grid()
 
@@ -138,10 +139,9 @@ def plot_lsf_esf_mtf_image(image, lsf, esf, mtf, ds, roi_x, roi_y, roi_size=16):
     spatial_freq_values = calculate_spatial_frequencies(mtf_interp, x_mtf_interp)
     
     # Add spatial frequencies as a table
-    table_data = [["MTF 50%", f"{spatial_freq_values[0.50]:.2f}"],
-                  ["MTF 25%", f"{spatial_freq_values[0.25]:.2f}"],
-                  ["MTF 10%", f"{spatial_freq_values[0.10]:.2f}"],
-                  ["MTF 2%", f"{spatial_freq_values[0.02]:.2f}"]]
+    table_data = [["MTF 50%", f"{spatial_freq_values[0.50]:.2f}  \u00B1 {std_sr:.2f} cycles/cm"],
+                  ["MTF 10%", f"{spatial_freq_values[0.10]:.2f}  \u00B1 {std_sr:.2f} cycles/cm"],
+                  ["MTF 2%", f"{spatial_freq_values[0.02]:.2f}  \u00B1 {std_sr:.2f} cycles/cm"]]
     
     table = axs[2,0].table(cellText=table_data,
                           colLabels=["MTF (%)", "Spatial Frequency"],
@@ -157,12 +157,61 @@ def plot_lsf_esf_mtf_image(image, lsf, esf, mtf, ds, roi_x, roi_y, roi_size=16):
 
     return fig
 
+def plot_all_mtf_data(all_mtf_data, output_folder, filename, scale_factor=10):
+    """ Plot all MTF data from every image into one plot in grey, and the average of all data points in black with selected std deviation error bars """
+    plt.figure(figsize=(10, 6))
+
+    # Plot all MTF curves in grey
+    for x_mtf_interp, mtf_interp in all_mtf_data:
+        plt.plot(x_mtf_interp * scale_factor, mtf_interp, color='grey', alpha=0.5)
+
+    # Interpolate to common x-values
+    x_values = np.linspace(0, np.max([x.max() for x, _ in all_mtf_data]) * scale_factor, 1000)
+    interpolated_mtf_data = []
+
+    for x_mtf_interp, mtf_interp in all_mtf_data:
+        f = PchipInterpolator(x_mtf_interp * scale_factor, mtf_interp)
+        interpolated_mtf_data.append(f(x_values))
+
+    interpolated_mtf_data = np.array(interpolated_mtf_data)
+
+    # Calculate the average and standard deviation of the interpolated MTF data
+    avg_mtf = np.mean(interpolated_mtf_data, axis=0)
+    std_sr = np.std(interpolated_mtf_data, axis=0)
+
+    # Plot the average MTF curve in black
+    plt.plot(x_values, avg_mtf, color='black', linewidth=2, label='Average MTF')
+
+    # Define specific MTF positions
+    mtf_positions = [0.50, 0.10, 0.02]
+
+    # Find the indices closest to these MTF positions
+    indices = [np.argmin(np.abs(avg_mtf - pos)) for pos in mtf_positions]
+
+    # Plot error bars at these positions
+    for idx in indices:
+        plt.errorbar(x_values[idx], avg_mtf[idx], yerr=std_sr[idx], fmt='o', color='grey', capsize=5)
+
+    plt.title('Combined MTF Plot')
+    plt.xlabel('Spatial Frequency (cycles/cm)')
+    plt.ylabel('MTF')
+    plt.legend()
+    plt.grid()
+
+    # Save the combined MTF plot to a PDF file
+    output_file = os.path.join(output_folder, f"{os.path.splitext(filename)[0]}combined_mtf_plot.pdf")
+    with PdfPages(output_file) as pdf:
+        pdf.savefig()
+        plt.close()
+    
+    return std_sr
+
 def calculate_spatial_frequencies(mtf_interp, x_interp):
     """ Calculate spatial frequencies corresponding to specific MTF values """
     spatial_freq_values = {}
     
     # Find spatial frequencies corresponding to MTF values of interest
-    for mtf_value in [0.50, 0.25, 0.10, 0.02]:
+    for mtf_value in [0.50, 0.10, 0.02]:
         # Find the nearest index where MTF is closest to the desired value
         idx = np.argmin(np.abs(mtf_interp - mtf_value))
         spatial_freq_values[mtf_value] = x_interp[idx]
@@ -171,46 +220,40 @@ def calculate_spatial_frequencies(mtf_interp, x_interp):
 
 def analysis_folder(folder_path, roi_size=16, output_folder=None):
     """ Process all DICOM images in a folder, calculate MTF """
-    # Ensure output folder exists
     if output_folder is None:
         output_folder = os.getcwd()
     os.makedirs(output_folder, exist_ok=True)
 
-    # Iterate over all files in the folder
+    all_mtf_data = []
+
     for filename in os.listdir(folder_path):
         file_path = os.path.join(folder_path, filename)
         print(f"Processing file: {file_path}")
         image, ds = load_dicom_image(file_path)
 
-        # Find maximum HU value
         max_hu_value = find_max_hu_value(image)
-
-        # Find coordinates of the maximum HU value in the image
         high_hu_pixels = np.where(image == max_hu_value)
         roi_x, roi_y = high_hu_pixels[1][0], high_hu_pixels[0][0]
 
-        # Extract ROI around the high HU pixel
         roi = image[roi_y - roi_size//2 : roi_y + roi_size//2,
                        roi_x - roi_size//2 : roi_x + roi_size//2]
 
-        # Calculate LSF (Line Spread Function)
         lsf = calculate_lsf(roi)
-
-        # Calculate ESF (Edge Spread Function)
         esf = calculate_esf(lsf)
-
-        # Calculate MTF (Modulation Transfer Function)
         mtf = calculate_mtf(esf)
 
-        # Interpolate MTF data
         x_mtf = np.fft.fftfreq(len(mtf))
-        x_mtf_interp, mtf_interp = mtf_interpolate_data(x_mtf[:len(mtf)//2], mtf[:len(mtf)//2])
+        x_mtf_interp, mtf_interp = mtf_interpolate_data(x_mtf[:len(mtf)//2], mtf[:len(mtf)//2], scale_factor=10)
 
-        # Plot LSF, ESF, MTF curves and DICOM image
-        fig = plot_lsf_esf_mtf_image(image, lsf, esf, mtf, ds, roi_x, roi_y, roi_size)
+        all_mtf_data.append((x_mtf_interp, mtf_interp))
+        std_sr = np.std(x_mtf_interp, axis=0)
 
-        # Save figure to PDF in output folder
+        fig = plot_lsf_esf_mtf_image(image, lsf, esf, mtf, ds, roi_x, roi_y, std_sr, roi_size)
+
         output_file = os.path.join(output_folder, f"{os.path.splitext(filename)[0]}_analysis.pdf")
         with PdfPages(output_file) as pdf:
             pdf.savefig(fig)
             plt.close(fig)
+    
+    # After processing all images, plot all MTF data together and get std_mtf
+    plot_all_mtf_data(all_mtf_data, output_folder, filename, scale_factor=10)

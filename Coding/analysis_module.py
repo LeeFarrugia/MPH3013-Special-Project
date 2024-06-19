@@ -1,5 +1,3 @@
-# analysis_module.py
-
 import os
 import pydicom
 import numpy as np
@@ -8,6 +6,9 @@ from matplotlib.backends.backend_pdf import PdfPages
 from scipy.fft import fft
 import cv2
 from scipy.interpolate import PchipInterpolator, CubicSpline
+import logging
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 from collections import defaultdict
 
 def load_dicom_image(file_path):
@@ -83,7 +84,7 @@ def find_outer_contour(image):
         print(f"An error occurred while detecting the outer edge: {e}")
         return None
 
-def plot_lsf_esf_mtf_image(image, lsf, esf, mtf, ds, roi_x, roi_y, std_sr, roi_size=16):
+def plot_lsf_esf_mtf_image(image, lsf, esf, mtf, ds, roi_x, roi_y, std_sr, roi_size=16, metadata=None):
     """ Plot LSF, ESF, MTF curves and the DICOM image with contour """
     fig, axs = plt.subplots(nrows=3, ncols=2, figsize=(15, 12))
 
@@ -153,6 +154,13 @@ def plot_lsf_esf_mtf_image(image, lsf, esf, mtf, ds, roi_x, roi_y, std_sr, roi_s
     table.set_fontsize(10)
     table.scale(1.2, 1.2)
 
+    # Add metadata as a text box
+    if metadata:
+        metadata_text = "\n".join([f"{key}: {value}" for key, value in metadata.items()])
+        axs[0,0].text(0.5, 0.5, metadata_text, fontsize=10, ha='center', va='center', transform=axs[0,0].transAxes)
+        axs[0,0].set_title('DICOM Metadata')
+        axs[0,0].axis('off')
+
     plt.tight_layout()
 
     return fig
@@ -218,6 +226,20 @@ def calculate_spatial_frequencies(mtf_interp, x_interp):
     
     return spatial_freq_values
 
+def extract_dicom_metadata(ds):
+    """ Extract specific metadata from DICOM header """
+    metadata = {
+        "kVp": ds.get("KVP", "N/A"),
+        "mAs": ds.get("Exposure", "N/A"),
+        "rotation_time": ds.get("RotationTime", "N/A"),
+        "recon_FOV": ds.get("ReconstructionDiameter", "N/A"),
+        "recon_Kernel": ds.get("FilterType", "N/A"),
+        "slice_thickness": ds.get("SliceThickness", "N/A"),
+        "manufacturer": ds.get("Manufacturer", "N/A"),
+        "manufacturer_model_name": ds.get("ManufacturerModelName", "N/A")
+    }
+    return metadata
+
 def analysis_folder(folder_path, roi_size=16, output_folder=None):
     """ Process all DICOM images in a folder, calculate MTF """
     if output_folder is None:
@@ -228,27 +250,46 @@ def analysis_folder(folder_path, roi_size=16, output_folder=None):
 
     for filename in os.listdir(folder_path):
         file_path = os.path.join(folder_path, filename)
-        print(f"Processing file: {file_path}")
-        image, ds = load_dicom_image(file_path)
+        logging.info(f"Processing file: {file_path}")
+        try:
+            image, ds = load_dicom_image(file_path)
+            
+            # Extract DICOM metadata
+            metadata = extract_dicom_metadata(ds)
 
-        max_hu_value = find_max_hu_value(image)
-        high_hu_pixels = np.where(image == max_hu_value)
-        roi_x, roi_y = high_hu_pixels[1][0], high_hu_pixels[0][0]
+            # Find maximum HU value
+            max_hu_value = find_max_hu_value(image)
 
+            # Find coordinates of the maximum HU value in the image
+            high_hu_pixels = np.where(image == max_hu_value)
+            roi_x, roi_y = high_hu_pixels[1][0], high_hu_pixels[0][0]
+
+            # Extract ROI around the high HU pixel
+            roi = image[roi_y - roi_size//2 : roi_y + roi_size//2,
+                        roi_x - roi_size//2 : roi_x + roi_size//2]
         roi = image[roi_y - roi_size//2 : roi_y + roi_size//2,
                        roi_x - roi_size//2 : roi_x + roi_size//2]
 
-        lsf = calculate_lsf(roi)
-        esf = calculate_esf(lsf)
-        mtf = calculate_mtf(esf)
+            # Calculate LSF (Line Spread Function)
+            lsf = calculate_lsf(roi)
 
+            # Calculate ESF (Edge Spread Function)
+            esf = calculate_esf(lsf)
+
+            # Calculate MTF (Modulation Transfer Function)
+            mtf = calculate_mtf(esf)
+
+            # Interpolate MTF data
+            x_mtf = np.fft.fftfreq(len(mtf))
+            x_mtf_interp, mtf_interp = mtf_interpolate_data(x_mtf[:len(mtf)//2], mtf[:len(mtf)//2])
         x_mtf = np.fft.fftfreq(len(mtf))
         x_mtf_interp, mtf_interp = mtf_interpolate_data(x_mtf[:len(mtf)//2], mtf[:len(mtf)//2], scale_factor=10)
 
         all_mtf_data.append((x_mtf_interp, mtf_interp))
         std_sr = np.std(x_mtf_interp, axis=0)
 
-        fig = plot_lsf_esf_mtf_image(image, lsf, esf, mtf, ds, roi_x, roi_y, std_sr, roi_size)
+        # Plot LSF, ESF, MTF curves and DICOM image
+        fig = plot_lsf_esf_mtf_image(image, lsf, esf, mtf, ds, roi_x, roi_y, roi_size)
 
         output_file = os.path.join(output_folder, f"{os.path.splitext(filename)[0]}_analysis.pdf")
         with PdfPages(output_file) as pdf:
@@ -257,3 +298,11 @@ def analysis_folder(folder_path, roi_size=16, output_folder=None):
     
     # After processing all images, plot all MTF data together and get std_mtf
     plot_all_mtf_data(all_mtf_data, output_folder, filename, scale_factor=10)
+            # Save figure to PDF in output folder
+            output_file = os.path.join(output_folder, f"{os.path.splitext(filename)[0]}_analysis.pdf")
+            with PdfPages(output_file) as pdf:
+                pdf.savefig(fig)
+                plt.close(fig)
+
+        except Exception as e:
+            logging.error(f"Error processing file {file_path}: {e}")

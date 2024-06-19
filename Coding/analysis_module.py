@@ -9,7 +9,6 @@ from scipy.interpolate import PchipInterpolator, CubicSpline
 import logging
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-from collections import defaultdict
 
 def load_dicom_image(file_path):
     """ Load DICOM image and return pixel array """
@@ -94,8 +93,7 @@ def plot_lsf_esf_mtf_image(image, lsf, esf, mtf, ds, roi_x, roi_y, std_sr, roi_s
     axs[1,0].plot(contour[:, 0, 0], contour[:, 0, 1], '-r', linewidth=1)
     
     # Draw ROI square in red
-    roi_rect = plt.Rectangle((roi_x - roi_size//2, roi_y - roi_size//2), roi_size, roi_size, 
-                             linewidth=1, edgecolor='r', facecolor='none')
+    roi_rect = plt.Rectangle((roi_x - roi_size//2, roi_y - roi_size//2), roi_size, roi_size, linewidth=1, edgecolor='r', facecolor='none')
     axs[1,0].add_patch(roi_rect)
     
     axs[1,0].set_title('DICOM Image')
@@ -140,15 +138,13 @@ def plot_lsf_esf_mtf_image(image, lsf, esf, mtf, ds, roi_x, roi_y, std_sr, roi_s
     spatial_freq_values = calculate_spatial_frequencies(mtf_interp, x_mtf_interp)
     
     # Add spatial frequencies as a table
-    table_data = [["MTF 50%", f"{spatial_freq_values[0.50]:.2f}  \u00B1 {std_sr:.2f} cycles/cm"],
-                  ["MTF 10%", f"{spatial_freq_values[0.10]:.2f}  \u00B1 {std_sr:.2f} cycles/cm"],
-                  ["MTF 2%", f"{spatial_freq_values[0.02]:.2f}  \u00B1 {std_sr:.2f} cycles/cm"]]
+    table_data = [
+        ["MTF 50%", f"{spatial_freq_values[0.50]:.2f}  \u00B1 {std_sr:.2f} cycles/cm"], 
+        ["MTF 10%", f"{spatial_freq_values[0.10]:.2f}  \u00B1 {std_sr:.2f} cycles/cm"],
+        ["MTF 2%", f"{spatial_freq_values[0.02]:.2f}  \u00B1 {std_sr:.2f} cycles/cm"]
+        ]
     
-    table = axs[2,0].table(cellText=table_data,
-                          colLabels=["MTF (%)", "Spatial Frequency"],
-                          cellLoc='center',
-                          loc='center',
-                          colWidths=[0.2, 0.3])
+    table = axs[2,0].table(cellText=table_data, colLabels=["MTF (%)", "Spatial Frequency"], cellLoc='center', loc='center', colWidths=[0.2, 0.3])
     
     table.auto_set_font_size(False)
     table.set_fontsize(10)
@@ -265,10 +261,8 @@ def analysis_folder(folder_path, roi_size=16, output_folder=None):
             roi_x, roi_y = high_hu_pixels[1][0], high_hu_pixels[0][0]
 
             # Extract ROI around the high HU pixel
-            roi = image[roi_y - roi_size//2 : roi_y + roi_size//2,
-                        roi_x - roi_size//2 : roi_x + roi_size//2]
-            roi = image[roi_y - roi_size//2 : roi_y + roi_size//2,
-                       roi_x - roi_size//2 : roi_x + roi_size//2]
+            roi = image[roi_y - roi_size//2 : roi_y + roi_size//2, roi_x - roi_size//2 : roi_x + roi_size//2]
+            roi = image[roi_y - roi_size//2 : roi_y + roi_size//2, roi_x - roi_size//2 : roi_x + roi_size//2]
 
             # Calculate LSF (Line Spread Function)
             lsf = calculate_lsf(roi)

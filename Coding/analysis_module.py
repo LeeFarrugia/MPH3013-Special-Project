@@ -231,12 +231,12 @@ def extract_dicom_metadata(ds):
     metadata = {
         "kVp": ds.get("KVP", "N/A"),
         "mAs": ds.get("Exposure", "N/A"),
-        "rotation_time": ds.get("RotationTime", "N/A"),
-        "recon_FOV": ds.get("ReconstructionDiameter", "N/A"),
-        "recon_Kernel": ds.get("FilterType", "N/A"),
-        "slice_thickness": ds.get("SliceThickness", "N/A"),
-        "manufacturer": ds.get("Manufacturer", "N/A"),
-        "manufacturer_model_name": ds.get("ManufacturerModelName", "N/A")
+        "Time (ms)": ds.get("ExposureTime", "N/A"),
+        "Recon FOV": ds.get("ReconstructionDiameter", "N/A"),
+        "Recon Kernel": ds.get("ConvolutionKernel", "N/A"),
+        "Slice Thickness": ds.get("SliceThickness", "N/A"),
+        "Manufacturer": ds.get("Manufacturer", "N/A"),
+        "Manufacturer_model_name": ds.get("ManufacturerModelName", "N/A")
     }
     return metadata
 
@@ -267,12 +267,12 @@ def analysis_folder(folder_path, roi_size=16, output_folder=None):
             # Extract ROI around the high HU pixel
             roi = image[roi_y - roi_size//2 : roi_y + roi_size//2,
                         roi_x - roi_size//2 : roi_x + roi_size//2]
-        roi = image[roi_y - roi_size//2 : roi_y + roi_size//2,
+            roi = image[roi_y - roi_size//2 : roi_y + roi_size//2,
                        roi_x - roi_size//2 : roi_x + roi_size//2]
 
             # Calculate LSF (Line Spread Function)
             lsf = calculate_lsf(roi)
-
+        
             # Calculate ESF (Edge Spread Function)
             esf = calculate_esf(lsf)
 
@@ -282,27 +282,24 @@ def analysis_folder(folder_path, roi_size=16, output_folder=None):
             # Interpolate MTF data
             x_mtf = np.fft.fftfreq(len(mtf))
             x_mtf_interp, mtf_interp = mtf_interpolate_data(x_mtf[:len(mtf)//2], mtf[:len(mtf)//2])
-        x_mtf = np.fft.fftfreq(len(mtf))
-        x_mtf_interp, mtf_interp = mtf_interpolate_data(x_mtf[:len(mtf)//2], mtf[:len(mtf)//2], scale_factor=10)
+            x_mtf = np.fft.fftfreq(len(mtf))
+            x_mtf_interp, mtf_interp = mtf_interpolate_data(x_mtf[:len(mtf)//2], mtf[:len(mtf)//2], scale_factor=10)
 
-        all_mtf_data.append((x_mtf_interp, mtf_interp))
-        std_sr = np.std(x_mtf_interp, axis=0)
+            all_mtf_data.append((x_mtf_interp, mtf_interp))
+            std_sr = np.std(x_mtf_interp, axis=0)
 
-        # Plot LSF, ESF, MTF curves and DICOM image
-        fig = plot_lsf_esf_mtf_image(image, lsf, esf, mtf, ds, roi_x, roi_y, roi_size)
+            # Plot LSF, ESF, MTF curves and DICOM image
+            fig = plot_lsf_esf_mtf_image(image, lsf, esf, mtf, ds, roi_x, roi_y, std_sr, roi_size, metadata)
 
-        output_file = os.path.join(output_folder, f"{os.path.splitext(filename)[0]}_analysis.pdf")
-        with PdfPages(output_file) as pdf:
-            pdf.savefig(fig)
-            plt.close(fig)
-    
-    # After processing all images, plot all MTF data together and get std_mtf
-    plot_all_mtf_data(all_mtf_data, output_folder, filename, scale_factor=10)
-            # Save figure to PDF in output folder
             output_file = os.path.join(output_folder, f"{os.path.splitext(filename)[0]}_analysis.pdf")
             with PdfPages(output_file) as pdf:
                 pdf.savefig(fig)
                 plt.close(fig)
-
+        
         except Exception as e:
             logging.error(f"Error processing file {file_path}: {e}")
+
+    # After processing all images, plot all MTF data together and get std_mtf
+    plot_all_mtf_data(all_mtf_data, output_folder, filename, scale_factor=10)
+
+        
